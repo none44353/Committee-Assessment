@@ -1,4 +1,3 @@
-import profile
 import math
 import numpy as np
 import pandas as pd
@@ -9,14 +8,13 @@ from sklearn import preprocessing
 
 
 n = 4 # the number of judgers
-m = 3 # the number of players
+m = 8 # the number of players
 rnd = 30 # 迭代次数
-yita = 0.05
+yita = 0.5
 fstPrice = 100
 profileA, profileT, profileS, profileW, profileP = [], [], [], [], []
 Bias = (-0.1, 0, 0.1)
 cases = []
-numT = [0, 0]
 
 def initprofileA():
     global profileA
@@ -35,10 +33,20 @@ def initprofileS(profileA):
 def setJudgerType():
     global profileT #profileT是裁判的type列表，其中每个element对应一个裁判的偏好选手列表
     profileT = [0] * n 
-    for i in range(0, math.floor(n/2)):
-        profileT[i] = [0]
-    for i in range(math.floor(n/2), n):
-        profileT[i] = [1]
+
+    l = math.floor(n/4)
+    #for i in range(0, math.floor(n/2)):
+    #    profileT[i] = [0,1,2,3]
+    #for i in range(math.floor(n/2), n):
+    #    profileT[i] = [4,5,6,7]
+    for i in range(0, l):
+        profileT[i] = [0,1,2,3]
+    for i in range(l, 2 * l):
+        profileT[i] = [4,5,6,7]
+    for i in range(2 * l, 3 * l):
+        profileT[i] = [1,3,5,7]
+    for i in range(3 * l, n):
+        profileT[i] = [0,2,4,6]
     return 
 
 #假设选手的表现是[0, 1]之间的实数
@@ -53,14 +61,77 @@ def setJudgerType():
 #
 def setPlayerPerformance(): 
     global profileP
-    profileP = [0.0,-0.15, 0]
+    profileP = [0.05, 0, 0, 0, -0.05, 0, 0, 0]
     #for i in range(0, m):
     #    profileP.append(random.random())
     return 
       
-def Punish(act, pivot, others):
+def noPunish(act, pivot, others):
     return 0
     return (act[0]**2 + act[1]**2) * 1000
+
+def sgn(x):
+    if x == 0: return 0
+    if x < 0: return -1
+    return 1
+
+def getPairs(JA, JB, JC, all):
+    pairs = []
+    for j in range(0, m):
+        sA = all[JA][0] if j in profileT[JA] else all[JA][1]
+        sB = all[JB][0] if j in profileT[JB] else all[JB][1]
+        sC = all[JC][0] if j in profileT[JB] else all[JB][1]
+        pairs.append((sgn(sA - sC), sgn(sB - sC)))
+    return pairs   
+
+#pairs是一些联合分布的抽样 形如[(x_i, y_i), ...] 其中-1 <= xi,yi <= 1
+def getDMI(pairs): 
+    DMI2 = []
+    random.shuffle(pairs)
+    M1, M2 = np.zeros((3, 3)), np.zeros((3, 3))
+    for i in range(0, len(pairs) // 2):
+        x, y = int(pairs[i][0]), int(pairs[i][1])
+        M1[x][y] = M1[x][y] + 1
+    M1 /= (len(pairs) // 2)
+
+    for i in range(len(pairs) // 2, len(pairs)):
+        x, y = int(pairs[i][0]), int(pairs[i][1])
+        M2[x][y] = M2[x][y] + 1
+    M2 /= (len(pairs) - len(pairs) // 2)
+    
+    DMI2.append(np.linalg.det(M1) * np.linalg.det(M2))
+    #print(np.mean(np.array(DMI2)))
+    return np.mean(np.array(DMI2))
+
+def allPunish(act, pivot, others):
+    all = others
+    all[pivot] = act
+
+    score, total = 0, 0
+    for i in range(0, n):
+        for j in range(0, n):
+            for k in range(0, n):
+                if i != k and i != j and j < k:
+                    score = score + getDMI(getPairs(i, j, k, all))
+                    total = total + 1
+
+    return score / total
+
+def personalPunish(act, pivot, others):
+    all = others
+    all[pivot] = act
+
+    score, total = 0, 0
+    for i in range(0, n):
+        for j in range(0, n):
+            if i < j:
+                score = score + getDMI(getPairs(pivot, i, j, all))
+                total = total + 1
+
+    return score / total
+
+punishType = "no"
+Punishment = {"no": noPunish, "all": allPunish, "personal": personalPunish}
 
 def calcUtility(pivot, others): # 返回一个list, 表示如果你的动作是A, 你的收益有多少
     global m, fstPrice, profileA, profileP, profileT
@@ -93,7 +164,7 @@ def calcUtility(pivot, others): # 返回一个list, 表示如果你的动作是A
         for j in profileT[pivot]:
             if nsum[j] + profileP[j] == mxValue:
                 ui = ui + fstPrice/mxNum
-        ui = ui - Punish(act, pivot, others)
+        ui = ui - Punishment[punishType](act, pivot, others)
         utilities.append(ui)
     return utilities
 
@@ -138,12 +209,14 @@ def update():
     return
 
 def printf(profile):
-    for i in range(0,2):
+    for i in range(0,n):
         li = [round(x, 2) for x in profile[i]]
         print(li)
     return
 
 def main():
+    global punishType
+    punishType = input("Input punishment type (i.e. 'no', 'all', 'personal'):")
     setPlayerPerformance()
     initprofileA()
     initprofileS(profileA) 
@@ -154,10 +227,10 @@ def main():
         update()
         printf(profileS)
 
-    plt.subplot(1,1,1)
+    plt.subplot(1,2,1)
     sns.heatmap(pd.DataFrame(np.array(profileS[0]).reshape(3,3), columns = Bias, index = Bias))
     plt.subplot(1,2,2)
-    sns.heatmap(pd.DataFrame(np.array(profileS[1]).reshape(3,3), columns = Bias, index = Bias))
+    sns.heatmap(pd.DataFrame(np.array(profileS[n - 1]).reshape(3,3), columns = Bias, index = Bias))
     plt.show()
 
 # 设定裁判的偏好，奖项奖励和选手的performance，要求CCE
