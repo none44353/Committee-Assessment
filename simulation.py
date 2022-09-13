@@ -3,16 +3,17 @@ import math
 import numpy as np
 import pandas as pd
 import random
+import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn import preprocessing
 
 
-n = 6 # the number of judgers
-m = 2 # the number of players
-rnd = 100 # 迭代次数
-yita = 5
+n = 4 # the number of judgers
+m = 3 # the number of players
+rnd = 30 # 迭代次数
+yita = 0.05
 fstPrice = 100
-profileA, profileT, profileS = [], [], []
+profileA, profileT, profileS, profileW, profileP = [], [], [], [], []
 Bias = (-0.1, 0, 0.1)
 cases = []
 numT = [0, 0]
@@ -24,49 +25,20 @@ def initprofileA():
             profileA.append((b0, b1))
     return
 
-def initStrategy(profileA):
-    global profileS
-    for i in range(0, m):
+def initprofileS(profileA):
+    global profileS, profileW
+    for i in range(0, n):
         profileS.append([1/len(profileA)] * len(profileA))
+        profileW.append([1] * len(profileA))
     return
 
-def getCases(n, len):
-    cases = ()
-    for x in range(0, n+1):
-        cases.append([x])
-    for i in (1, len):
-        newcases = ()
-        for x in cases:
-            sum = 0
-            for e in x:
-                sum = sum + e
-            for i in (0, n - sum + 1):
-                newcases.append(list(x + [i]))
-        cases = newcases
-    
-    newcases = ()
-    for x in cases:
-        sum = 0
-        for i in x:
-            sum = sum + i
-        if sum == n:
-            newcases.append(x)
-    return newcases
-
 def setJudgerType():
-    global profileT
-    profileT = [0] * math.floor(n/2) + [1] * math.ceil(n/2)
-
-    global numT
-    for i in profileT:
-        numT[i] = numT[i] + 1
-    
-    global cases, profileA
-    cases = [0, 0, 0, 0]
-    for i in range(0, 2):
-        cases[i] = getCases(numT[i], len(profileA))
-        cases[i + 2] = getCases(numT[i] - 1, len(profileA))
-
+    global profileT #profileT是裁判的type列表，其中每个element对应一个裁判的偏好选手列表
+    profileT = [0] * n 
+    for i in range(0, math.floor(n/2)):
+        profileT[i] = [0]
+    for i in range(math.floor(n/2), n):
+        profileT[i] = [1]
     return 
 
 #假设选手的表现是[0, 1]之间的实数
@@ -79,95 +51,114 @@ def setJudgerType():
 #   conditioning on这种情况，可以计算每个action的punishment
 #   计算punishment之后再更新strategic
 #
-def PlayerPerformance(): 
-    profileP = ()
-    for i in range(0, 2):
-        profileP.append(random.random)
-    return profileP
-        
-def getProb(n, Strategy, cases):
-    prob = []
-    newcases = []
-    for x in cases:
-        sum = n
-        value = 1
-        for a in (0, len(Strategy)):
-            p = Strategy[a]
-            value = value * (p ** x[a]) * math.comb(sum, x[a])
-            sum = sum - x[a]
-        if value != 0:
-            newcases.append(x)
-            prob.append(value) 
-
-    return newcases, prob
-
-def merge(c1, c2, p1, p2):
-    cases, prob = [], []
-    for i in range(0, len(c1)):
-        x, p = c1[i], p1[i]
-        for j in range(0, len(c2)):
-            y, q = c2[i], p2[i]
-            z = (np.array(x) + np.array(y)).tolist()
-            cases.append(z)
-            prob.append(p * q)
-    return cases, prob
+def setPlayerPerformance(): 
+    global profileP
+    profileP = [0.0,-0.15, 0]
+    #for i in range(0, m):
+    #    profileP.append(random.random())
+    return 
       
-def calcUtility(type, others): # 返回一个list, 表示如果你的动作是A, 你的收益有多少
-    global profileA, fstPrice
-    utilities = []
-    sum = [0, 0]
-    for i in range(0, len(profileA)):
-        a = profileA[i]
-        for j in range(0, 2):
-            sum[j] = sum[j] + a[j] * others[i]
-        
-    for i in range(0, len(profileA)):
-        a = profileA[i]
-        nsum = (np.array(sum) + np.array(a)).tolist()
-        if (nsum[type] > nsum[1 - type]):
-            utilities.append(fstPrice)
-        if (nsum[type] < nsum[1 - type]):
-            utilities.append(0)
-        if (nsum[type] == nsum[1 - type]):
-            utilities.append(fstPrice / 2)
+def Punish(act, pivot, others):
+    return 0
+    return (act[0]**2 + act[1]**2) * 1000
 
+def calcUtility(pivot, others): # 返回一个list, 表示如果你的动作是A, 你的收益有多少
+    global m, fstPrice, profileA, profileP, profileT
+
+    utilities = []
+    sum = [0] * m
+    for i in range(0, n):
+        if i != pivot:
+            act = others[i]
+            addition = [act[0] if j in profileT[pivot] else act[1] for j in range(0, m)]
+            sum = (np.array(sum) + np.array(addition)).tolist()
+            #for j in range(0, m):
+            #    if j in profileT[i]: # player j是Judger i偏好的对象
+            #        sum[j] = sum[j] + act[0]
+            #    else:
+            #        sum[j] = sum[j] + act[1]
+
+    for act in profileA:
+        addition = [act[0] if j in profileT[pivot] else act[1] for j in range(0, m)]
+        nsum = (np.array(sum) + np.array(addition)).tolist()
+
+        mxValue, mxNum = nsum[0] + profileP[0], 1
+        for j in range(1, m):
+            if nsum[j] + profileP[j] > mxValue:
+                mxValue = nsum[j] + profileP[j]
+                mxNum = 1
+            elif nsum[j] + profileP[j] == mxValue:
+                mxNum = mxNum + 1
+        ui = 0
+        for j in profileT[pivot]:
+            if nsum[j] + profileP[j] == mxValue:
+                ui = ui + fstPrice/mxNum
+        ui = ui - Punish(act, pivot, others)
+        utilities.append(ui)
     return utilities
 
-def getCost(numT, cases, profileS):
-    global profileA
-    ntype = len(numT)
-    cost = []
-    for i in range(0, ntype):
-        c1, p1 = getProb(numT[i] - 1, profileS[i], cases[i + ntype])
-        c2, p2 = getProb(numT[1 - i], profileS[1 - i], cases[1 - i])
-        all, prob = merge(c1, c2, p1, p2)
+def getProb(profileS, pivot):
+    global n, profileA
+    cases, prob = [[]], [1]
+    for i in range(0, n):
+        Strategy = profileS[i]
+        newcases, newProb = [], []
+        if i == pivot:
+            for event, p in zip(cases, prob):
+                newcases.append(event + [-1])
+                newProb.append(p)
+        else:
+            for event, p in zip(cases, prob):
+                for act, pi in zip(profileA, Strategy):
+                    newcases.append(event + [act])
+                    newProb.append(p * pi)
+        cases = newcases
+        prob = newProb
+    return cases, prob
 
+def getCost(profileS):
+    global n, profileA
+    cost = []
+    for i in range(0, n):
+        all, prob = getProb(profileS, i)
         price = [0] * len(profileA)
-        for i in range(0, len(all)):
-            x, p = all[i], prob[i]
+        for x, p in zip(all, prob):
             price = (np.array(price) + p * np.array(calcUtility(i, x))).tolist()
         cost.append(price)
-
     return cost
 
 def update():
-    global numT, cases, profileS, profileW
-    cost = getCost(numT, cases, profileS)
-    for i in range(0, 2):
+    global profileS, profileW
+    cost = getCost(profileS)
+    for i in range(0, n):
         profileW[i] = np.array(profileW[i]) * (1 + yita * np.array(cost[i]))
-        profileS[i] = preprocessing.normalize(profileW[i])
-        profileW[i] = profileW[i].tolist()
-        profileS[i] = profileS[i].tolist()
+        profileS[i] = preprocessing.normalize([profileW[i]], norm="l1").tolist()[0]
+        profileW[i] = profileS[i]
+        
+    return
+
+def printf(profile):
+    for i in range(0,2):
+        li = [round(x, 2) for x in profile[i]]
+        print(li)
     return
 
 def main():
+    setPlayerPerformance()
     initprofileA()
     initprofileS(profileA) 
     setJudgerType()
-    profileW = list([1] * n, [1] * n)
-    for i in range(0, rnd)：
-        profileW = update(profileW)
-    print(profileT)
+    print(profileA)
+    for i in range(0, rnd):
+        print("Update ",i)
+        update()
+        printf(profileS)
+
+    plt.subplot(1,1,1)
+    sns.heatmap(pd.DataFrame(np.array(profileS[0]).reshape(3,3), columns = Bias, index = Bias))
+    plt.subplot(1,2,2)
+    sns.heatmap(pd.DataFrame(np.array(profileS[1]).reshape(3,3), columns = Bias, index = Bias))
+    plt.show()
 
 # 设定裁判的偏好，奖项奖励和选手的performance，要求CCE
 if __name__ == "__main__":
